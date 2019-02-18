@@ -15,6 +15,7 @@ func TestApps(t *testing.T) {
 	for _, line := range strings.Split(sample, "\n") {
 		Parse(&line, &msg)
 
+		msg.Apps = msg.Apps[:0]
 		data, err := proto.Marshal(&msg)
 		if err != nil {
 			t.Fatalf("Marshaling error expected nil but got %s", err)

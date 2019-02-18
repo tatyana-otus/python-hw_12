@@ -45,13 +45,13 @@ var DEFAUL_CONFIG config = config{pattern: "src/data/tmp_uniq_key.gz",
 
 const QUEUE_SIZE = 1024
 
-func worker(ch chan *string, mc_jobs map[string]*mc_info, e_stat *int) {
+func worker(job chan *string, mc_jobs map[string]*mc_info, e_stat *int) {
 	msg := apps.UserApps{Apps: make([]uint32, 0, 1024),
 		Lat: new(float64),
 		Lon: new(float64)}
 	e_count := 0
 	for {
-		s := <-ch
+		s := <- job
 		if s == nil {
 			*e_stat = e_count
 			return
@@ -78,12 +78,12 @@ func worker(ch chan *string, mc_jobs map[string]*mc_info, e_stat *int) {
 	}
 }
 
-func loader(ch chan *memcache.Item, client *memcache.Client,
+func loader(job chan *memcache.Item, client *memcache.Client,
 	e_stat *int, p_stat *int, retries int, retry_delay int) {
 	e_cnt := 0
 	p_cnt := 0
 	for {
-		d := <-ch
+		d := <- job
 		if d == nil {
 			*e_stat = e_cnt
 			*p_stat = p_cnt
