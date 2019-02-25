@@ -13,7 +13,7 @@ func TestApps(t *testing.T) {
 		Lat: new(float64),
 		Lon: new(float64)}
 	for _, line := range strings.Split(sample, "\n") {
-		Parse(&line, &msg)
+		Parse(line, &msg)
 
 		msg.Apps = msg.Apps[:0]
 		data, err := proto.Marshal(&msg)

@@ -41,7 +41,8 @@ func TestMcLoad(t *testing.T) {
 		"adid": memcache.New("127.0.0.1:33015"),
 		"dvid": memcache.New("127.0.0.1:33016")}
 	restart_mc()
-	exec.Command("go", "run", "main.go", "--pattern", "data/tmp_uniq_key.gz").Run()
+
+	exec.Command("go", "run", "main.go", "--test", "--pattern", "data/tmp_uniq_key.gz").Run()
 
 	msg := apps.UserApps{Apps: make([]uint32, 0, 1024),
 		Lat: new(float64),
@@ -59,7 +60,7 @@ func TestMcLoad(t *testing.T) {
 	for scanner.Scan() {
 		s := scanner.Text()
 		msg.Apps = msg.Apps[:0]
-		dev_type, dev_id, _ := apps.Parse(&s, &msg)
+		dev_type, dev_id, _ := apps.Parse(s, &msg)
 		key := dev_type + ":" + dev_id
 		data, err := apps.Serialize(&msg)
 		if err != nil {
