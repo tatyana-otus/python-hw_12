@@ -5,15 +5,19 @@ import (
 
 	"bufio"
 	"compress/gzip"
+	"errors"
 	"flag"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
+	"github.com/golang/protobuf/proto"
 )
 
 type (
@@ -35,6 +39,14 @@ type (
 		client *memcache.Client
 		queue  chan *memcache.Item
 	}
+
+	appsInstalled struct {
+		devType string
+		devId   string
+		lat     float64
+		lon     float64
+		apps    []uint32
+	}
 )
 
 const (
@@ -42,29 +54,62 @@ const (
 	constNormalErrRate = 0.01
 )
 
-func worker(job chan string, loadersJob map[string]*memcacheInfo, errorsStat chan int) {
-	msg := apps.UserApps{Apps: make([]uint32, 0, 1024),
-		Lat: new(float64),
-		Lon: new(float64)}
+func parse(s string) (*appsInstalled, error) {
 
+	d := strings.Split(strings.TrimSpace(s), "\t")
+	if len(d) != 5 {
+		log.Printf("parsing error: %s", s)
+		return nil, errors.New("parsing error")
+	}
+	devType, devId, lat, lon, raw_apps := d[0], d[1], d[2], d[3], d[4]
+	if devType == "" || devId == "" {
+		log.Printf("parsing error: %s", s)
+		return nil, errors.New("parsing error")
+	}
+	parsedApps := appsInstalled{devType: devType, devId: devId}
+	for _, str_app := range strings.Split(raw_apps, ",") {
+		v, err := strconv.ParseInt(str_app, 10, 32)
+		if err == nil {
+			parsedApps.apps = append(parsedApps.apps, uint32(v))
+		} else {
+			log.Printf("Not all user apps are digits: %s", s)
+		}
+	}
+	lat_f, err := strconv.ParseFloat(lat, 64)
+	if err != nil {
+		log.Printf("Invalid geo coords: %s", s)
+		lat_f = 0
+	}
+	parsedApps.lat = lat_f
+	lon_f, err := strconv.ParseFloat(lon, 64)
+	if err != nil {
+		log.Printf("Invalid geo coords: %s", s)
+		lon_f = 0
+	}
+	parsedApps.lon = lon_f
+
+	return &parsedApps, nil
+}
+
+func worker(job chan string, loadersJob map[string]*memcacheInfo, errorsStat chan int) {
 	errors := 0
 	for s := range job {
-		msg.Apps = msg.Apps[:0]
-		devType, devId, err := apps.Parse(s, &msg)
+		parsedApps, err := parse(s)
 		if err != nil {
 			errors++
 			continue
 		}
-		key := devType + ":" + devId
-
-		data, err := apps.Serialize(&msg)
+		key := parsedApps.devType + ":" + parsedApps.devId
+		data, err := proto.Marshal(&apps.UserApps{Apps: parsedApps.apps,
+			Lat: proto.Float64(parsedApps.lat),
+			Lon: proto.Float64(parsedApps.lon)})
 		if err != nil {
 			log.Printf("%s", err)
 			errors++
 			continue
 		}
-		if _, ok := loadersJob[devType]; ok {
-			loadersJob[devType].queue <- &memcache.Item{Key: key, Value: data}
+		if _, ok := loadersJob[parsedApps.devType]; ok {
+			loadersJob[parsedApps.devType].queue <- &memcache.Item{Key: key, Value: data}
 		} else {
 			errors++
 		}

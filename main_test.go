@@ -2,16 +2,20 @@ package main
 
 import (
 	"./apps"
+
 	"bufio"
 	"compress/gzip"
 	"errors"
-	"github.com/bradfitz/gomemcache/memcache"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
+
+	"github.com/bradfitz/gomemcache/memcache"
+	"github.com/golang/protobuf/proto"
 )
 
-const TEST_FILE = "data/tmp_uniq_key.gz"
+const TEST_FILE = "testdata/tmp_uniq_key.gz"
 
 func restart_mc() {
 	exec.Command("killall", "memcached").Run()
@@ -42,11 +46,8 @@ func TestMcLoad(t *testing.T) {
 		"dvid": memcache.New("127.0.0.1:33016")}
 	restart_mc()
 
-	exec.Command("go", "run", "main.go", "--test", "--pattern", "data/tmp_uniq_key.gz").Run()
+	exec.Command("go", "run", "main.go", "--test", "--pattern", TEST_FILE).Run()
 
-	msg := apps.UserApps{Apps: make([]uint32, 0, 1024),
-		Lat: new(float64),
-		Lon: new(float64)}
 	f, err := os.Open(TEST_FILE)
 	defer f.Close()
 	if err != nil {
@@ -59,21 +60,58 @@ func TestMcLoad(t *testing.T) {
 	scanner := bufio.NewScanner(gr)
 	for scanner.Scan() {
 		s := scanner.Text()
-		msg.Apps = msg.Apps[:0]
-		dev_type, dev_id, _ := apps.Parse(s, &msg)
-		key := dev_type + ":" + dev_id
-		data, err := apps.Serialize(&msg)
+		parsedApps, _ := parse(s)
+		key := parsedApps.devType + ":" + parsedApps.devId
+		data, err := proto.Marshal(&apps.UserApps{Apps: parsedApps.apps,
+			Lat: proto.Float64(parsedApps.lat),
+			Lon: proto.Float64(parsedApps.lon)})
 		if err != nil {
 			t.Fatalf("Marshaling error %s", err)
 			return
 		}
-		item, err := mc_client[dev_type].Get(key)
-
+		item, err := mc_client[parsedApps.devType].Get(key)
 		if err != nil {
 			t.Fatalf("MC client error %s", err)
 		}
 		if err := compare_mc_value(&item.Value, &data); err != nil {
 			t.Fatalf("key: %s (%s)", key, err)
+		}
+	}
+}
+
+func TestApps(t *testing.T) {
+	sample := "idfa\t1rfw452y52g2gq4g\t55.55\t42.42\t1423,43,567,3,7,23\ngaid\t7rfw452y52g2gq4g\t55.55\t42.42\t7423,424"
+
+	for _, line := range strings.Split(sample, "\n") {
+		parsedApps, _ := parse(line)
+		data, err := proto.Marshal(&apps.UserApps{Apps: parsedApps.apps,
+			Lat: proto.Float64(parsedApps.lat),
+			Lon: proto.Float64(parsedApps.lon)})
+		if err != nil {
+			t.Fatalf("Marshaling error expected nil but got %s", err)
+			return
+		}
+
+		msg2 := new(apps.UserApps)
+		err = proto.Unmarshal(data, msg2)
+		if err != nil {
+			t.Fatalf("Unmarshaling error expected nil but got %s", err)
+		}
+
+		if len(parsedApps.apps) != len(msg2.Apps) {
+			t.Fatalf("Error apps size %d != %d", len(parsedApps.apps), len(msg2.Apps))
+		}
+
+		for i := 0; i < len(parsedApps.apps); i++ {
+			if parsedApps.apps[i] != msg2.Apps[i] {
+				t.Fatalf("Error in apps %d != %d", parsedApps.apps[i], msg2.Apps[i])
+			}
+		}
+		if parsedApps.lat != *msg2.Lat {
+			t.Fatalf("Error in Lat %f != %f", parsedApps.lat, *msg2.Lat)
+		}
+		if parsedApps.lon != *msg2.Lon {
+			t.Fatalf("Error in Lon %f != %f", parsedApps.lon, *msg2.Lon)
 		}
 	}
 }
